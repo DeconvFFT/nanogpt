@@ -64,14 +64,19 @@ def estimate_loss():
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
-        self.lm_head = nn.Linear(n_embed, vocab_size)
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embed)# Embedding identity of tokens
+        self.lm_head = nn.Linear(n_embed, vocab_size) 
+        self.positional_embedding = nn.Embedding(block_size, n_embed) # embedding of position of tokens. Each token from 0 to block_size-1 has a unique embedding
         
     def forward(self, idx:torch.Tensor, targets:torch.Tensor=None)->tuple[torch.Tensor, torch.Tensor|None]:
         #logits = self.token_embedding_table(idx) # (B,T,C) (Batch, Time, Channel)
         # adding token embeddings and then we try to get logits from them using a linear layer
-        token_embeddings = self.token_embedding_table(idx) # (B,T,C = n_embed)
-        logits = self.lm_head(token_embeddings) # (B,T,C = vocab_size)
+        
+        B,T = idx.shape
+        token_embeddings = self.token_embedding_table(idx) # (B,T,C = n_embed) # token embedding layer
+        pos_embeddings = self.positional_embedding(torch.arange(T, device = device)) # (T,C = n_embed). ALl integers from 0 to T-1 have a unique embedding
+        x = token_embeddings + pos_embeddings # (B,T,C = n_embed) 
+        logits = self.lm_head(x) # (B,T,C = vocab_size) # Language modeling head:
         
         ## Pytorch expects inputs to be (B, C, T)
        

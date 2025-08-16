@@ -64,14 +64,27 @@ def estimate_loss():
 class Head(nn.Module):
     """A single head of self attention
     """
-    def __init__(self, head_size):
+    def __init__(self, head_size:int)->None:
+        """ Initialize network  params
+        
+        Args:
+            head_size (int): Size of single attention head
+        """
         super().__init__()
         self.key = nn.Linear(n_embed, head_size, bias=False)
         self.query = nn.Linear(n_embed, head_size, bias=False)
         self.value = nn.Linear(n_embed, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size))) # buffer is a tensor that is not a parameter of the model and is not a part of the state_dict
         
-    def forward(self, x):
+    def forward(self, x:torch.Tensor)->torch.Tensor:
+        """ Pass input through the network
+
+        Args:
+            x (torch.Tensor): Inputs to the network
+
+        Returns:
+            torch.Tensor: Output of the network
+        """
         B,T,C = x.shape
         k = self.key(x) # (B,T,C = head_size)
         q = self.query(x) # (B,T,C = head_size)
@@ -88,25 +101,55 @@ class Head(nn.Module):
 class MultiAttentionHead(nn.Module):
     """ Multiple self attention heads in parallel"""
     
-    def __init__(self, num_heads, head_size):
+    def __init__(self, num_heads:int, head_size:int)->None:
+        """ Initialise Params for Multi headed self attention
+
+        Args:
+            num_heads (int): Number of heads we want
+            head_size (int): Dimension of each head
+        """
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size=head_size) for _ in range(num_heads)])
+        self.projection = nn.Linear(n_embed, n_embed) # Linear transformation of the outcome
         
-    def forward(self, x):
-        return torch.cat([h(x) for h in self.heads], dim=-1) # concat over channel dimension
-    
+    def forward(self, x: torch.Tensor)->torch.Tensor:
+        """ Forwards network inputs
+
+        Args:
+            x (torch.Tensor): Input tensor
+
+        Returns:
+            torch.Tensor: Output tensor with multi headed self attention and a Linear projection applied to those attentions
+        """
+        out = torch.cat([h(x) for h in self.heads], dim=-1) # concat over channel dimension
+        out = self.projection(out) # Projection back to our original pathway
+        return out
 
 class FeedForward(nn.Module): # adding a linear layer to allow tokens some time to think about what they've learned
     """ Simple Linear Layer followed by a non linearity """
     
-    def __init__(self, n_embed):
+    def __init__(self, n_embed:int)->None:
+        """ Initialise parameters and network for a simple Feed forward network
+
+        Args:
+            n_embed (int): Embedding size
+        """
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(n_embed, n_embed),
-            nn.ReLU()
+            nn.Linear(n_embed, 4* n_embed),
+            nn.ReLU(),
+            nn.Linear(4* n_embed, n_embed), # projection layer
         )
     
-    def forward(self, x):
+    def forward(self, x:torch.Tensor)->torch.Tensor:
+        """ Pass input tensors through network
+
+        Args:
+            x (torch.Tensor): Input tensor
+
+        Returns:
+            torch.Tensor: Tensor with a linear transformation and RELU activation applied and projected back to original pathway
+        """
         return self.net(x)
     
 
@@ -131,8 +174,8 @@ class Block(nn.Module):
         Returns:
             torch.Tensor: Tensor with self attention passed through a Feed Forward network
         """
-        x = self.self_attention(x)
-        x = self.feed_forward(x)
+        x = x + self.self_attention(x) # x =  x +  (any other computation): adds a residual connection for (any other computation). We deviate from the original path and add the results back in once done
+        x = x + self.feed_forward(x)
         return x
         
         

@@ -4,16 +4,18 @@ import torch.nn.functional as F
 
 
 # hyperparameters
-batch_size = 32
-block_size = 8
+batch_size = 64 # How many idependent sequences we will process in parallel?
+block_size = 256 # What is the maximum context length for predictions?
 max_iters = 5000
 eval_interval = 500
-learning_rate = 1e-3 # self attention can't tolerate very high learning rates
+learning_rate = 3e-4 # self attention can't tolerate very high learning rates
 device = 'mps' if torch.backends.mps.is_available() else 'cpu'
 print(f'Using device: {device}')
 eval_iters = 200
-n_embed = 32 
-n_heads = 4
+n_embed = 384 
+n_heads = 6
+n_layers = 6
+dropout_rate = 0.2
 
 
 torch.manual_seed(1337)
@@ -75,7 +77,7 @@ class Head(nn.Module):
         self.query = nn.Linear(n_embed, head_size, bias=False)
         self.value = nn.Linear(n_embed, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size))) # buffer is a tensor that is not a parameter of the model and is not a part of the state_dict
-        
+        self.dropout = nn.Dropout(dropout_rate)
     def forward(self, x:torch.Tensor)->torch.Tensor:
         """ Pass input through the network
 
@@ -94,6 +96,7 @@ class Head(nn.Module):
         weights = q @ k.transpose(-2, -1) * C ** -0.5 # (B, T, C) @ (B, C, T) -> (B, T, T)
         weights = weights.masked_fill(self.tril[:T, :T]==0, float('-inf')) # (B, T, T)
         weights = F.softmax(weights, dim=-1) # (B, T, T)
+        weights = self.dropout(weights)
         out = weights @ v #(B, T, T) @ (B, T, C) -> (B, T, C = head_size)
         return out 
         
@@ -111,6 +114,7 @@ class MultiAttentionHead(nn.Module):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size=head_size) for _ in range(num_heads)])
         self.projection = nn.Linear(n_embed, n_embed) # Linear transformation of the outcome
+        self.dropout = nn.Dropout(dropout_rate)
         
     def forward(self, x: torch.Tensor)->torch.Tensor:
         """ Forwards network inputs
@@ -139,6 +143,7 @@ class FeedForward(nn.Module): # adding a linear layer to allow tokens some time 
             nn.Linear(n_embed, 4* n_embed),
             nn.ReLU(),
             nn.Linear(4* n_embed, n_embed), # projection layer
+            nn.Dropout(dropout_rate)
         )
     
     def forward(self, x:torch.Tensor)->torch.Tensor:
@@ -191,12 +196,16 @@ class BigramLanguageModel(nn.Module):
         # self.sa_heads = MultiAttentionHead(n_heads, n_embed//n_heads) # Self attention heads. n_heads communication channels in parallel. n_embed/n_heads dimensional self attention
         # self.ffwd = FeedForward(n_embed=n_embed)
         ## changing implementation to blocked implementation similar to how transformer does it
-        self.blocks = nn.Sequential(
-            Block(n_embed=n_embed, n_heads=4),
-            Block(n_embed=n_embed, n_heads=4),
-            Block(n_embed=n_embed, n_heads=4),
-            nn.LayerNorm(n_embed),  # one layer norm right before we pass it to language modeling head
-        )
+        # self.blocks = nn.Sequential(
+        #     Block(n_embed=n_embed, n_heads=4),
+        #     Block(n_embed=n_embed, n_heads=4),
+        #     Block(n_embed=n_embed, n_heads=4),
+        #     nn.LayerNorm(n_embed),  # one layer norm right before we pass it to language modeling head
+        # )
+        
+        ## Scaling up our model
+        self.blocks = nn.Sequential(*[Block(n_embed =n_embed, n_heads=n_heads) for _ in range(n_layers)])
+        self.layer_norm_final = nn.LayerNorm(n_embed)
         self.lm_head = nn.Linear(n_embed, vocab_size) 
 
     def forward(self, idx:torch.Tensor, targets:torch.Tensor=None)->tuple[torch.Tensor, torch.Tensor|None]:
@@ -242,7 +251,13 @@ class BigramLanguageModel(nn.Module):
         return idx
     
 model = BigramLanguageModel()
-m = model.to(device)
+torch.mps.profiler.start(mode='interval')
+
+model.to(device)
+model_device = next(model.parameters()).device
+
+# Print the device
+print(f"The model is currently located on: {model_device}")
 
 # Optimiser
 optimizer = torch.optim.AdamW(model.parameters(), lr = learning_rate)
@@ -265,6 +280,11 @@ for iter in range(max_iters):
 
 
 context = torch.zeros((1,1), dtype=torch.long, device=device)
+# Stop the profiler and get results
+profiling_result = torch.mps.profiler.stop()
+
+# Print a summary of the profiling data
+profiling_result.print_summary()
 print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
     
     

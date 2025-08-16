@@ -6,13 +6,14 @@ import torch.nn.functional as F
 # hyperparameters
 batch_size = 32
 block_size = 8
-max_iters = 3000
-eval_interval = 300
+max_iters = 5000
+eval_interval = 500
 learning_rate = 1e-3 # self attention can't tolerate very high learning rates
 device = 'mps' if torch.backends.mps.is_available() else 'cpu'
 print(f'Using device: {device}')
 eval_iters = 200
 n_embed = 32 
+n_heads = 4
 
 
 torch.manual_seed(1337)
@@ -83,12 +84,23 @@ class Head(nn.Module):
         out = weights @ v #(B, T, T) @ (B, T, C) -> (B, T, C = head_size)
         return out 
         
+        
+class MultiAttentionHead(nn.Module):
+    """ Multiple self attention heads in parallel"""
+    
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size=head_size) for _ in range(num_heads)])
+        
+    def forward(self, x):
+        return torch.cat([h(x) for h in self.heads], dim=-1) # concat over channel dimension
+    
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)# Embedding identity of tokens
         self.lm_head = nn.Linear(n_embed, vocab_size) 
-        self.sa_head = Head(n_embed) # Self attention head
+        self.sa_heads = MultiAttentionHead(n_heads, n_embed//n_heads) # Self attention heads. n_heads communication channels in parallel. n_embed/n_heads dimensional self attention
         self.positional_embedding = nn.Embedding(block_size, n_embed) # embedding of position of tokens. Each token from 0 to block_size-1 has a unique embedding
         
     def forward(self, idx:torch.Tensor, targets:torch.Tensor=None)->tuple[torch.Tensor, torch.Tensor|None]:
@@ -99,7 +111,7 @@ class BigramLanguageModel(nn.Module):
         token_embeddings = self.token_embedding_table(idx) # (B,T,C = n_embed) # token embedding layer
         pos_embeddings = self.positional_embedding(torch.arange(T, device = device)) # (T,C = n_embed). ALl integers from 0 to T-1 have a unique embedding
         x = token_embeddings + pos_embeddings # (B,T,C = n_embed) 
-        x = self.sa_head(x) # adding one head of self attention to embeddings (token + positional)
+        x = self.sa_heads(x) # adding one head of self attention to embeddings (token + positional)
         logits = self.lm_head(x) # (B,T,C = vocab_size) # Language modeling head:
         
         ## Pytorch expects inputs to be (B, C, T)

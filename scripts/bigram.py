@@ -60,12 +60,35 @@ def estimate_loss():
     model.train()
     return out
     
-    
+class Head(nn.Module):
+    """A single head of self attention
+    """
+    def __init(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(n_embed, head_size, bias=False)
+        self.query = nn.Linear(n_embed, head_size, bias=False)
+        self.value = nn.Linear(n_embed, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size))) # buffer is a tensor that is not a parameter of the model and is not a part of the state_dict
+        
+    def forward(self, x):
+        B,T,C = x.shape
+        k = self.key(x) # (B,T,C = head_size)
+        q = self.query(x) # (B,T,C = head_size)
+        v = self.value(x) # (B, T, C = head_size)
+        
+        # calculate attention scores
+        weights = q @ k.transpose(-2, -1) * C ** -0.5 # (B, T, C) @ (B, C, T) -> (B, T, T)
+        weights = weights.masked_fill(self.trill==0, float('-inf')) # (B, T, T)
+        weights = F.softmax(weights, dim=-1) # (B, T, T)
+        out = weights @ v #(B, T, T) @ (B, T, C) -> (B, T, C = head_size)
+        return out 
+        
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)# Embedding identity of tokens
         self.lm_head = nn.Linear(n_embed, vocab_size) 
+        self.sa_head = Head(n_embed) # Self attention head
         self.positional_embedding = nn.Embedding(block_size, n_embed) # embedding of position of tokens. Each token from 0 to block_size-1 has a unique embedding
         
     def forward(self, idx:torch.Tensor, targets:torch.Tensor=None)->tuple[torch.Tensor, torch.Tensor|None]:
@@ -76,6 +99,7 @@ class BigramLanguageModel(nn.Module):
         token_embeddings = self.token_embedding_table(idx) # (B,T,C = n_embed) # token embedding layer
         pos_embeddings = self.positional_embedding(torch.arange(T, device = device)) # (T,C = n_embed). ALl integers from 0 to T-1 have a unique embedding
         x = token_embeddings + pos_embeddings # (B,T,C = n_embed) 
+        x = self.sa_head(x) # adding self attention to embeddings (token + positional)
         logits = self.lm_head(x) # (B,T,C = vocab_size) # Language modeling head:
         
         ## Pytorch expects inputs to be (B, C, T)

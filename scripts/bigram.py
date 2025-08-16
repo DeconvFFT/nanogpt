@@ -251,7 +251,6 @@ class BigramLanguageModel(nn.Module):
         return idx
     
 model = BigramLanguageModel()
-torch.mps.profiler.start(mode='interval')
 
 model.to(device)
 model_device = next(model.parameters()).device
@@ -280,11 +279,7 @@ for iter in range(max_iters):
 
 
 context = torch.zeros((1,1), dtype=torch.long, device=device)
-# Stop the profiler and get results
-profiling_result = torch.mps.profiler.stop()
 
-# Print a summary of the profiling data
-profiling_result.print_summary()
 print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
     
     

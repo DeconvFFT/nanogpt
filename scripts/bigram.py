@@ -190,6 +190,7 @@ class Block(nn.Module):
         
 
 class BigramLanguageModel(nn.Module):
+    ## Current implementation: Decoder only model: Just a generation text now. The triangular mask makes it a decoder model.
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)# Embedding identity of tokens
@@ -253,7 +254,7 @@ class BigramLanguageModel(nn.Module):
     
 model = BigramLanguageModel()
 
-model.to(device)
+m = model.to(device)
 model_device = next(model.parameters()).device
 
 # Print the device
@@ -277,11 +278,11 @@ for iter in range(max_iters):
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
-
+    break
 
 context = torch.zeros((1,1), dtype=torch.long, device=device)
 
-print(decode(model.generate(context, max_new_tokens=500)[0].tolist()))
+print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
     
     
     

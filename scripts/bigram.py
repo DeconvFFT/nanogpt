@@ -63,7 +63,7 @@ def estimate_loss():
 class Head(nn.Module):
     """A single head of self attention
     """
-    def __init(self, head_size):
+    def __init__(self, head_size):
         super().__init__()
         self.key = nn.Linear(n_embed, head_size, bias=False)
         self.query = nn.Linear(n_embed, head_size, bias=False)
@@ -78,7 +78,7 @@ class Head(nn.Module):
         
         # calculate attention scores
         weights = q @ k.transpose(-2, -1) * C ** -0.5 # (B, T, C) @ (B, C, T) -> (B, T, T)
-        weights = weights.masked_fill(self.trill==0, float('-inf')) # (B, T, T)
+        weights = weights.masked_fill(self.tril[:T, :T]==0, float('-inf')) # (B, T, T)
         weights = F.softmax(weights, dim=-1) # (B, T, T)
         out = weights @ v #(B, T, T) @ (B, T, C) -> (B, T, C = head_size)
         return out 
@@ -99,7 +99,7 @@ class BigramLanguageModel(nn.Module):
         token_embeddings = self.token_embedding_table(idx) # (B,T,C = n_embed) # token embedding layer
         pos_embeddings = self.positional_embedding(torch.arange(T, device = device)) # (T,C = n_embed). ALl integers from 0 to T-1 have a unique embedding
         x = token_embeddings + pos_embeddings # (B,T,C = n_embed) 
-        x = self.sa_head(x) # adding self attention to embeddings (token + positional)
+        x = self.sa_head(x) # adding one head of self attention to embeddings (token + positional)
         logits = self.lm_head(x) # (B,T,C = vocab_size) # Language modeling head:
         
         ## Pytorch expects inputs to be (B, C, T)
@@ -117,7 +117,10 @@ class BigramLanguageModel(nn.Module):
     def generate(self, idx:torch.Tensor, max_new_tokens:int)->torch.Tensor:
         # idx is (B, T) array of indices in the current context
         for _ in range(max_new_tokens):
-            logits, loss = self(idx)
+            # crop idx to the last block_size tokens
+            idx_cond = idx[:, -block_size:] 
+            # predictions on indices
+            logits, loss = self(idx_cond)
             # focus only on the last time step
             logits = logits[:,-1,:] # becomes (B, C)
             # apply softmax to get probabilities

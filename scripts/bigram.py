@@ -167,6 +167,8 @@ class Block(nn.Module):
         head_size = n_embed//n_heads 
         self.self_attention = MultiAttentionHead(num_heads=n_heads, head_size=head_size)
         self.feed_forward = FeedForward(n_embed=n_embed)
+        self.layer_norm1 = nn.LayerNorm(n_embed) # Layer norm is similar to batch norm but it normalises rows instead of columns. And we don't need to keep track of running mean and variances
+        self.layer_norm2 = nn.LayerNorm(n_embed) # we apply layer norm on inputs of self attention and feed forward
         
     def forward(self, x:torch.Tensor) -> torch.Tensor:
         """_summary_
@@ -174,8 +176,8 @@ class Block(nn.Module):
         Returns:
             torch.Tensor: Tensor with self attention passed through a Feed Forward network
         """
-        x = x + self.self_attention(x) # x =  x +  (any other computation): adds a residual connection for (any other computation). We deviate from the original path and add the results back in once done
-        x = x + self.feed_forward(x)
+        x = x + self.self_attention(self.layer_norm1(x)) # x =  x +  (any other computation): adds a residual connection for (any other computation). We deviate from the original path and add the results back in once done
+        x = x + self.feed_forward(self.layer_norm2(x))
         return x
         
         
@@ -193,6 +195,7 @@ class BigramLanguageModel(nn.Module):
             Block(n_embed=n_embed, n_heads=4),
             Block(n_embed=n_embed, n_heads=4),
             Block(n_embed=n_embed, n_heads=4),
+            nn.LayerNorm(n_embed),  # one layer norm right before we pass it to language modeling head
         )
         self.lm_head = nn.Linear(n_embed, vocab_size) 
 

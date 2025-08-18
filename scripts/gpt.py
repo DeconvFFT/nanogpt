@@ -4,6 +4,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import os
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
@@ -277,11 +278,16 @@ for iter in range(max_iters):
 context = torch.zeros((1,1), dtype=torch.long, device=device)
 
 print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
+save_path = 'models/gpt.pth'
+save_directory = os.path.dirname(save_path)
 
-torch.save(model.state_dict(), 'models/gpt.pth')
+# Create the directory if it does not exist
+# The 'exist_ok=True' argument prevents an error if the directory already exists
+os.makedirs(save_directory, exist_ok=True)
+torch.save(model.state_dict(), save_path)
 
 # load model and run inference:
 m1 = GPTLanguageModel()
-m1.load_state_dict(torch.load('models/gpt.pth', weights_only=True))
+m1.load_state_dict(torch.load(save_path, weights_only=True))
 m1.eval()
 print(f'Saved Model Generated: {decode(m1.generate(context, max_new_tokens=500)[0].tolist())}')

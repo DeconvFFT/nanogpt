@@ -253,7 +253,58 @@ class GPT(nn.Module):
         return model
 ## test pre-trained model
 
+## Testing code
 
-model = GPT.from_pretrained('gpt2')
-        
+def generate_from_pretrained():
+    n_return_sentences = 5
+    max_length = 30
+    model = GPT.from_pretrained('gpt2')
+    model.eval()
+    model.to('mps')
+
+    ## replicating what we did in the notebook
+    ## prefix tokens:
+    import tiktoken
+    enc = tiktoken.get_encoding("gpt2") # get encoding for GPT-2
+
+    ## encode the input text
+    tokens = enc.encode("Hello, I'm a language model,") # encode the input text
+    tokens = torch.tensor(tokens, dtype=torch.long, device='mps') #(8,)
+    tokens = tokens.unsqueeze(0).repeat(n_return_sentences, 1) # shape: (5,8)
+    x = tokens.to('mps')
+
+    ## generate new tokens.x.shape = (B,T) -> B = 5, T = 8
+    torch.manual_seed(42)
+    torch.mps.manual_seed(42)
+
+    while x.size(1) < max_length:
+        with torch.no_grad():
+            logits, _ = model(x)
+            logits = logits[:, -1, :] # (B,T,vocab_size) -> (B,vocab_size)
+            
+            # softmax to get probabilities
+            probs = F.softmax(logits, dim=-1)
+            
+            # top 50 sampling
+            topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
+            
+            # sample from the distribution
+            # avoid sampling very rare tokens
+            # helps keep model on track
+            idx = torch.multinomial(topk_probs, num_samples=1)
+            
+            # gather corresponding indices to the sampled tokens
+            xcol = torch.gather(topk_indices, -1, idx)
+            x = torch.cat((x, xcol), dim=1)
+
+
+    # print geenrated text
+    for i in range(n_return_sentences):
+        tokens = x[i, :max_length].tolist()
+        decoded = enc.decode(tokens)
+        print(">", decoded)
+
+generate_from_pretrained()
+
+
         

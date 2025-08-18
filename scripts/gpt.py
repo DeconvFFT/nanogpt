@@ -288,6 +288,7 @@ torch.save(model.state_dict(), save_path)
 
 # load model and run inference:
 m1 = GPTLanguageModel()
+m1 = m1.to(device)
 m1.load_state_dict(torch.load(save_path, weights_only=True))
 m1.eval()
 print(f'Saved Model Generated: {decode(m1.generate(context, max_new_tokens=500)[0].tolist())}')

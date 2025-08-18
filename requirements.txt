@@ -1,0 +1,14 @@
+torch
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+scipy
+tqdm
+datasets
+transformers
+tiktoken
+tqdm
+torchvision
+datasets

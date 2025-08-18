@@ -253,9 +253,22 @@ class GPT(nn.Module):
         return model
 ## test pre-trained model
 
+# autodetect device
+def detect_device():
+    if torch.cuda.is_available():
+        print("Using CUDA")
+        return 'cuda'
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        print("Using MPS")
+        return 'mps'
+    else:
+        print("Using CPU")
+        return 'cpu'
+    
+
 ## Testing code
 
-def generate_from_pretrained():
+def generate_from_pretrained(device:str):
     n_return_sentences = 5
     max_length = 30
     model = GPT.from_pretrained('gpt2')
@@ -304,7 +317,7 @@ def generate_from_pretrained():
         decoded = enc.decode(tokens)
         print(">", decoded)
 
-generate_from_pretrained()
+generate_from_pretrained(device = detect_device())
 
 
         

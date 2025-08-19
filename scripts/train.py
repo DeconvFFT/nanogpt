@@ -12,7 +12,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 import tiktoken
 from gpt2 import GPTConfig, GPT
-
+import json
 
 # autodetect device
 def detect_device():
@@ -69,7 +69,7 @@ def train_model(model, device:str):
     torch.set_float32_matmul_precision('high')
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9,0.95), eps=1e-8) # 3e-4 is a good learning rate for GPT-2
-    
+    lr_config = get_configs('config/train_gpt2.json')
     for iter in range(100):
         t0 = time.time()
         x,y = loader.get_next_batch()
@@ -80,15 +80,45 @@ def train_model(model, device:str):
             logits, loss = model(x,y)
         loss.backward()
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # prevent the model from too large gradients
+        lr = get_lr(iter, lr_config)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
         optimizer.step()
         torch.cuda.synchronize()
         t1 = time.time()
         d1 = (t1-t0)*1000
         tokens_per_sec = (loader.B*loader.T*1000)/d1
         
-        print(f"Iteration {iter}, Loss: {loss.item()}| norm: {norm:.4f} | dt: {d1:.2f}ms | Tokens/sec: {tokens_per_sec:.2f}")
+        print(f"Iteration {iter}, Loss: {loss.item()}| lr: {lr:.4f} | norm: {norm:.4f} |  dt: {d1:.2f}ms | Tokens/sec: {tokens_per_sec:.2f}")
         
+def get_configs(filename:str):
+    with open(filename, 'r') as f:
+        config = json.load(f)
+    return config
+
+def get_lr(step:int,config:dict):
+    # Learning rate scheduler
+    warmup_steps = config['warmup_steps']
+    max_steps = config['max_steps']
+    max_lr = config['max_lr']
+    min_lr = config['min_lr']
     
+    # 1.) Linear warmup till model reaches warmup_steps
+    if step < warmup_steps:
+        return max_lr * (step+1)/warmup_steps
+    # 2.) If we've reached max_steps, return min_lr
+    if step>max_steps:
+        return min_lr
+    # 3.) In between, using cosine decay down to min_lr
+    # decay learning rate
+    decay_ratio = (step-warmup_steps)/(max_steps-warmup_steps)
+    assert 0<=decay_ratio<=1
+    # coeff is a value between 0 and 1 that determines the amount of decay
+    coeff = 0.5*(1.0+math.cos(math.pi*decay_ratio))
+    return min_lr + coeff*(max_lr-min_lr)
+    
+    
+
 def load_model(device:str):
     model = GPT(GPTConfig())
     model.to(device)

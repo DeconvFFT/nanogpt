@@ -70,20 +70,24 @@ def check_ddp_env():
     ddp = int(os.environ.get('RANK',-1)) != -1
     if ddp:
         
-        # use DDP if CUDA is available
-        assert torch.cuda.is_available(), "DDP requires CUDA"
-        init_process_group(backend='nccl')
+        # use DDP if CUDA is available        
         if torch.cuda.is_available():
+            init_process_group(backend='nccl')
             torch.cuda.set_device(int(os.environ.get('LOCAL_RANK',0)))
+        elif torch.backends.mps.is_available():
+            init_process_group(backend='mps')
+            torch.mps.set_device(int(os.environ.get('LOCAL_RANK',0)))
         else:
-            raise ValueError("DDP requires CUDA")
+            raise ValueError("DDP requires CUDA or MPS")
         
         ddp_rank = int(os.environ['RANK'])
         ddp_local_rank = int(os.environ['LOCAL_RANK'])
         ddp_world_size = int(os.environ['WORLD_SIZE'])
-        ddp_device = f'cuda:{ddp_local_rank}' if torch.cuda.is_available() else 'cpu'
+        ddp_device = f'cuda:{ddp_local_rank}' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
         if ddp_device == 'cuda':
             torch.cuda.set_device(ddp_local_rank)
+        elif ddp_device == 'mps':
+            torch.mps.set_device(ddp_local_rank)
         else:
             raise ValueError("DDP requires CUDA or MPS")
         master_process = ddp_rank == 0

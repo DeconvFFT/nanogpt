@@ -206,7 +206,7 @@ class GPT(nn.Module):
         return logits, loss
         
         
-    def configure_optimizers(self, weight_decay:float, learning_rate:float,betas:tuple(float,float), device:str):
+    def configure_optimizers(self, weight_decay, learning_rate,betas:, device):
         ## Get all candidate parameters
         params_dict = {pn:p for pn, p in self.named_parameters()}
         # filter out params that don't require grad

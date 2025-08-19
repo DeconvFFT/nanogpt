@@ -71,23 +71,19 @@ def check_ddp_env():
     if ddp:
         
         # use DDP if CUDA is available
-        assert torch.cuda.is_available(), assert torch.backends.mps.is_available(), "DDP requires CUDA or MPS"
+        assert torch.cuda.is_available(), "DDP requires CUDA"
         init_process_group(backend='nccl')
         if torch.cuda.is_available():
             torch.cuda.set_device(int(os.environ.get('LOCAL_RANK',0)))
-        elif torch.backends.mps.is_available():
-            torch.mps.set_device(int(os.environ.get('LOCAL_RANK',0)))
         else:
-            raise ValueError("DDP requires CUDA or MPS")
+            raise ValueError("DDP requires CUDA")
         
         ddp_rank = int(os.environ['RANK'])
         ddp_local_rank = int(os.environ['LOCAL_RANK'])
         ddp_world_size = int(os.environ['WORLD_SIZE'])
-        ddp_device = f'cuda:{ddp_local_rank}' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
+        ddp_device = f'cuda:{ddp_local_rank}' if torch.cuda.is_available() else 'cpu'
         if ddp_device == 'cuda':
             torch.cuda.set_device(ddp_local_rank)
-        elif ddp_device == 'mps':
-            torch.mps.set_device(ddp_local_rank)
         else:
             raise ValueError("DDP requires CUDA or MPS")
         master_process = ddp_rank == 0
@@ -100,7 +96,7 @@ def check_ddp_env():
     
     return ddp, ddp_rank, ddp_local_rank, ddp_world_size, ddp_device, master_process
     
-def train_model(model, ddp, ddp_rank, ddp_local_rank, ddp_world_size, ddp_device, master_process, device):
+def train_model(model,raw_model, ddp, ddp_rank, ddp_local_rank, ddp_world_size, ddp_device, master_process, device):
 
     torch.manual_seed(1337)
     if torch.cuda.is_available():
@@ -123,7 +119,7 @@ def train_model(model, ddp, ddp_rank, ddp_local_rank, ddp_world_size, ddp_device
 
     #torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9,0.95), eps=1e-8) # 3e-4 is a good learning rate for GPT-2
     lr_config = get_configs('config/train_gpt2.json')
-    optimizer = model.configure_optimizers(weight_decay=lr_config['weight_decay'],learning_rate=lr_config['max_lr'],betas=(lr_config['beta1'], lr_config['beta2']), device=device)
+    optimizer = raw_model.configure_optimizers(weight_decay=lr_config['weight_decay'],learning_rate=lr_config['max_lr'],betas=(lr_config['beta1'], lr_config['beta2']), device=device)
 
     for iter in range(100):
         t0 = time.time()
@@ -197,7 +193,8 @@ def load_model(device:str, ddp, ddp_local_rank):
         # once backward pass is done, the gradients are all reduced and averaged across the world. 
         # sync gradients across the world. 
         model = DDP(model, device_ids=[ddp_local_rank])
-    return model
+    raw_model = model.module if ddp else model
+    return model,raw_model
 
 def generate_from_pretrained(device:str):
     n_return_sentences = 5
@@ -258,5 +255,5 @@ if __name__ == "__main__":
     device = detect_device()
     ddp, ddp_rank, ddp_local_rank, ddp_world_size, ddp_device, master_process = check_ddp_env()
 
-    model = load_model(device, ddp, ddp_local_rank)
-    train_model(model,ddp, ddp_rank, ddp_local_rank, ddp_world_size, ddp_device, master_process, device)
+    model,raw_model = load_model(device, ddp, ddp_local_rank)
+    train_model(model,raw_model,ddp, ddp_rank, ddp_local_rank, ddp_world_size, ddp_device, master_process, device)

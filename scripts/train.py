@@ -26,24 +26,33 @@ def detect_device():
     else:
         print("Using CPU")
         return 'cpu'
-
+def load_tokens(filename):
+    npt = np.load(filename)
+    npt = npt.astype(np.int32) # added after video
+    ptt = torch.tensor(npt, dtype=torch.long)
+    return ptt
 # Simple data loader
 class DataLoaderSmall:
-    def __init__(self, B, T, process_rank, num_processes):
+    def __init__(self, B, T, process_rank, num_processes, split, master_process):
         self.B = B
         self.T = T
         self.process_rank = process_rank
         self.num_processes = num_processes
+        assert split in ['train', 'val'], "split must be either train or val"
         
-        with open(f"data/input.txt", "r") as f:
-            text = f.read()
-        enc = tiktoken.get_encoding("gpt2")
-        tokens = enc.encode(text)
-        self.tokens = torch.tensor(tokens, dtype=torch.long)
-        print(f'Loaded: {len(tokens)} tokens')
-        print(f'1 Epoch = {len(tokens)//B*T} batches')
+        # get shards
+        data_dir = "data/fineweb/edu_fineweb10B"
+        shards = os.listdir(data_dir)
+        shards = [s for s in shards if split in s]
+        shards = sorted(shards)
+        shards = [os.path.join(data_dir, s) for s in shards]
+        self.shards = shards
+        assert len(shards) > 0, f"No shards found for split: {split}"
+        if master_process:
+            print(f"Loading {split} data from {len(shards)} shards")
         
-        self.curr_idx = self.B * self.T * self.process_rank
+        self.reset()
+        
         
         
     def get_next_batch(self):
@@ -58,10 +67,17 @@ class DataLoaderSmall:
         
         # if loading next batch results in out of bounds, reset current index
         if self.curr_idx + (B*T*self.num_processes + 1) > len(self.tokens):
+            # advance to next shard
+            self.current_shard = (self.current_shard + 1) % len(self.shards)
+            # advance to next chunk
+            self.tokens = load_tokens(self.shards[self.current_shard])
             self.curr_idx = self.B * self.T * self.process_rank
-            
         return x, y
-        
+    
+    def reset(self):
+        self.current_shard = 0
+        self.tokens = load_tokens(self.shards[self.current_shard])
+        self.curr_idx = self.B * self.T * self.process_rank
 def check_ddp_env():
     from torch.distributed import init_process_group, destroy_process_group
     

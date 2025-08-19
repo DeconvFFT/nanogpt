@@ -65,7 +65,7 @@ def train_model(model, device:str):
         torch.cuda.manual_seed(1337)
     if torch.backends.mps.is_available():
         torch.mps.manual_seed(1337)
-    loader = DataLoaderSmall(B=16, T=12024)
+    loader = DataLoaderSmall(B=16, T=1024)
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4) # 3e-4 is a good learning rate for GPT-2
     

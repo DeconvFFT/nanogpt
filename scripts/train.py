@@ -68,8 +68,10 @@ def train_model(model, device:str):
     loader = DataLoaderSmall(B=16, T=1024)
     torch.set_float32_matmul_precision('high')
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9,0.95), eps=1e-8) # 3e-4 is a good learning rate for GPT-2
+    #torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9,0.95), eps=1e-8) # 3e-4 is a good learning rate for GPT-2
     lr_config = get_configs('config/train_gpt2.json')
+    optimizer = model.configure_optimizers(weight_decay=config['weight_decay'],learning_rate=lr_configp['max_lr'], device=device)
+
     for iter in range(100):
         t0 = time.time()
         x,y = loader.get_next_batch()
@@ -89,7 +91,7 @@ def train_model(model, device:str):
         d1 = (t1-t0)*1000
         tokens_per_sec = (loader.B*loader.T*1000)/d1
         
-        print(f"Iteration {iter}, Loss: {loss.item()}| lr: {lr:.4f} | norm: {norm:.4f} |  dt: {d1:.2f}ms | Tokens/sec: {tokens_per_sec:.2f}")
+        print(f"Iteration {iter}, Loss: {loss.item()}| lr: {lr:.4e} | norm: {norm:.4f} |  dt: {d1:.2f}ms | Tokens/sec: {tokens_per_sec:.2f}")
         
 def get_configs(filename:str):
     with open(filename, 'r') as f:

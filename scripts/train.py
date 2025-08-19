@@ -68,7 +68,7 @@ def train_model(model, device:str):
     loader = DataLoaderSmall(B=16, T=1024)
     torch.set_float32_matmul_precision('high')
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4) # 3e-4 is a good learning rate for GPT-2
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9,0.95), eps=1e-8) # 3e-4 is a good learning rate for GPT-2
     
     for iter in range(100):
         t0 = time.time()
@@ -79,13 +79,14 @@ def train_model(model, device:str):
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
             logits, loss = model(x,y)
         loss.backward()
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # prevent the model from too large gradients
         optimizer.step()
         torch.cuda.synchronize()
         t1 = time.time()
         d1 = (t1-t0)*1000
         tokens_per_sec = (loader.B*loader.T*1000)/d1
         
-        print(f"Iteration {iter}, Loss: {loss.item()}, dt: {d1:.2f}ms, Tokens/sec: {tokens_per_sec:.2f}")
+        print(f"Iteration {iter}, Loss: {loss.item()}| norm: {norm:.4f} | dt: {d1:.2f}ms | Tokens/sec: {tokens_per_sec:.2f}")
         
     
 def load_model(device:str):

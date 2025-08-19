@@ -24,6 +24,8 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
+
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
@@ -75,6 +77,7 @@ class MLP(nn.Module):
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -127,6 +130,9 @@ class GPT(nn.Module):
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        ## Tying weights of bottom of the transformer and top of the transformer
+        ## BOth layers have this property: Sematically similar tokens should have similar embeddings
+        ## Saves arounnd 30% of parameters by sharing weights
         self.transformer.wte.weight = self.lm_head.weight # weight tying
         # init all weights
         self.apply(self._init_weights)
@@ -152,7 +158,10 @@ class GPT(nn.Module):
     
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            std = 0.02
+            if hasattr(module, 'NANOGPT_SCALE_INIT'):
+                std *= (2 * self.config.n_layer) ** -0.5
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
@@ -161,7 +170,7 @@ class GPT(nn.Module):
     def forward(self, idx, targets=None):
         # idx and targets are both (B, T) tensor of integers
         B, T = idx.size()
-        assert T<=self.config.block_size, f"Can't forward sequence of length {T}, block size is only {self.config.block_size}"
+        #assert T<=self.config.block_size, f"Can't forward sequence of length {T}, block size is only {self.config.block_size}"
         
         # forward pass
         
@@ -184,6 +193,9 @@ class GPT(nn.Module):
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
+            # The logits and targets are reshaped to be (B*T, vocab_size) and (B*T) respectively as cross_entropy function doesn't support multi-dimensional inputs.
+            # logits.view(-1, logits.size(-1)) -> (B*T, vocab_size)
+            # targets.view(-1) -> (B*T)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
@@ -253,71 +265,9 @@ class GPT(nn.Module):
         return model
 ## test pre-trained model
 
-# autodetect device
-def detect_device():
-    if torch.cuda.is_available():
-        print("Using CUDA")
-        return 'cuda'
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        print("Using MPS")
-        return 'mps'
-    else:
-        print("Using CPU")
-        return 'cpu'
-    
+
 
 ## Testing code
-
-def generate_from_pretrained(device:str):
-    n_return_sentences = 5
-    max_length = 30
-    model = GPT.from_pretrained('gpt2')
-    model.eval()
-    model.to('mps')
-
-    ## replicating what we did in the notebook
-    ## prefix tokens:
-    import tiktoken
-    enc = tiktoken.get_encoding("gpt2") # get encoding for GPT-2
-
-    ## encode the input text
-    tokens = enc.encode("Hello, I'm a language model,") # encode the input text
-    tokens = torch.tensor(tokens, dtype=torch.long, device='mps') #(8,)
-    tokens = tokens.unsqueeze(0).repeat(n_return_sentences, 1) # shape: (5,8)
-    x = tokens.to('mps')
-
-    ## generate new tokens.x.shape = (B,T) -> B = 5, T = 8
-    torch.manual_seed(42)
-    torch.mps.manual_seed(42)
-
-    while x.size(1) < max_length:
-        with torch.no_grad():
-            logits, _ = model(x)
-            logits = logits[:, -1, :] # (B,T,vocab_size) -> (B,vocab_size)
-            
-            # softmax to get probabilities
-            probs = F.softmax(logits, dim=-1)
-            
-            # top 50 sampling
-            topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
-            
-            # sample from the distribution
-            # avoid sampling very rare tokens
-            # helps keep model on track
-            idx = torch.multinomial(topk_probs, num_samples=1)
-            
-            # gather corresponding indices to the sampled tokens
-            xcol = torch.gather(topk_indices, -1, idx)
-            x = torch.cat((x, xcol), dim=1)
-
-
-    # print geenrated text
-    for i in range(n_return_sentences):
-        tokens = x[i, :max_length].tolist()
-        decoded = enc.decode(tokens)
-        print(">", decoded)
-
-generate_from_pretrained(device = detect_device())
 
 
         

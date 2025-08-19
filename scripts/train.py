@@ -65,8 +65,18 @@ def train_model(model, device:str):
         torch.cuda.manual_seed(1337)
     if torch.backends.mps.is_available():
         torch.mps.manual_seed(1337)
-    loader = DataLoaderSmall(B=16, T=1024)
     torch.set_float32_matmul_precision('high')
+
+
+    # Gradient accumulation
+    total_batch_size = 524288 # 2**19 ~ .5M tokens
+    B = 16
+    T = 1024
+    assert total_batch_size % (B*T) == 0 # Make sure total batch size is divisible by (B*T)
+    grad_accumulation_steps = total_batch_size // (B*T)
+    print(f" Total batch size: {total_batch_size}, Batch size: {B}, Sequence length: {T}, Grad accumulation steps: {grad_accumulation_steps}")
+
+    loader = DataLoaderSmall(B=16, T=1024)
 
     #torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9,0.95), eps=1e-8) # 3e-4 is a good learning rate for GPT-2
     lr_config = get_configs('config/train_gpt2.json')
@@ -74,13 +84,19 @@ def train_model(model, device:str):
 
     for iter in range(100):
         t0 = time.time()
-        x,y = loader.get_next_batch()
-        x,y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        # torch autocast to bf16 to save memory
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
-            logits, loss = model(x,y)
-        loss.backward()
+        loss_accum = 0
+        # accumulate gradients
+        for micro_step in range(grad_accumulation_steps):
+            x,y = loader.get_next_batch()
+            x,y = x.to(device), y.to(device)
+            
+            # torch autocast to bf16 to save memory
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                logits, loss = model(x,y)
+            loss = loss/grad_accumulation_steps # scale the loss to account for the gradient accumulation. If we don't do this, loss = sum(lossi), we loose on the normalization factor 
+            loss_accum+=loss.detach()
+            loss.backward() # loss.backward() accumulates gradients so it does a +=
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # prevent the model from too large gradients
         lr = get_lr(iter, lr_config)
         for param_group in optimizer.param_groups:
@@ -88,10 +104,11 @@ def train_model(model, device:str):
         optimizer.step()
         torch.cuda.synchronize()
         t1 = time.time()
-        d1 = (t1-t0)*1000
-        tokens_per_sec = (loader.B*loader.T*1000)/d1
+        d1 = (t1-t0)
+        tokens_processed = loader.B*loader.T*grad_accumulation_steps
+        tokens_per_sec = (tokens_processed)/d1
         
-        print(f"Iteration {iter}, Loss: {loss.item()}| lr: {lr:.4e} | norm: {norm:.4f} |  dt: {d1:.2f}ms | Tokens/sec: {tokens_per_sec:.2f}")
+        print(f"Iteration {iter}, Loss: {loss_accum.item():.6f}| lr: {lr:.4e} | norm: {norm:.4f} |  dt: {d1:.2f}ms | Tokens/sec: {tokens_per_sec:.2f}")
         
 def get_configs(filename:str):
     with open(filename, 'r') as f:

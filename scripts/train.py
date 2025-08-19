@@ -66,7 +66,8 @@ def train_model(model, device:str):
     if torch.backends.mps.is_available():
         torch.mps.manual_seed(1337)
     loader = DataLoaderSmall(B=16, T=1024)
-    
+    torch.set_float32_matmul_precision('high')
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4) # 3e-4 is a good learning rate for GPT-2
     
     for iter in range(100):
@@ -74,7 +75,9 @@ def train_model(model, device:str):
         x,y = loader.get_next_batch()
         x,y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        logits, loss = model(x,y)
+        # torch autocast to bf16 to save memory
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x,y)
         loss.backward()
         optimizer.step()
         torch.cuda.synchronize()
@@ -88,6 +91,9 @@ def train_model(model, device:str):
 def load_model(device:str):
     model = GPT(GPTConfig())
     model.to(device)
+    # model compilation. Pytorch doesn't just run in eager mode. It analyses the model and compiles it for faster execution. 
+    # It's able to know what operations are needed, whats coming next and so it's able to optimize the model for faster execution. 
+    model = torch.compile(model) # ~ 2.3x speedup
     return model
 
 def generate_from_pretrained(device:str):
